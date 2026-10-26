@@ -1516,6 +1516,38 @@ function openNewReceipt() {
   };
   ocrText.addEventListener('input', applyTextSuggestions);
   const ocr = btn('Leer texto con OCR local', { onClick: readPhoto });
+  const paddleStatus = h('p', { class: 'hint', role: 'status' }, 'Prueba experimental: el modelo se descargará al iniciar por primera vez. La foto se procesa en este dispositivo.');
+  const paddleText = h('textarea', { readonly: true, rows: '7', placeholder: 'El resultado PaddleOCR aparecerá aquí para compararlo.' });
+  const runPaddleOCR = async () => {
+    error.replaceChildren();
+    const file = selectedPhoto;
+    if (!file) { paddleStatus.className = 'hint bad'; paddleStatus.textContent = 'Primero toma o selecciona una foto.'; return; }
+    if (file.size > 10 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(file.type)) { paddleStatus.className = 'hint bad'; paddleStatus.textContent = 'Usa una foto JPG, PNG o WebP de hasta 10 MB.'; return; }
+    await busy(paddleButton, 'Cargando modelo…', async () => {
+      let engine;
+      try {
+        paddleStatus.className = 'hint'; paddleStatus.textContent = 'Cargando PaddleOCR y sus modelos (primera vez puede tardar)…';
+        const { PaddleOCR } = await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');
+        engine = await PaddleOCR.create({
+          lang: 'es',
+          ocrVersion: 'PP-OCRv5',
+          ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/' }
+        });
+        paddleStatus.textContent = 'Leyendo la boleta con PaddleOCR…';
+        const [result] = await engine.predict(file);
+        paddleText.value = (result.items || []).map(item => item.text + '  [' + Math.round((item.score || 0) * 100) + '%]').join('\n');
+        paddleStatus.className = 'hint warn';
+        paddleStatus.textContent = paddleText.value ? 'Lectura terminada. El porcentaje es confianza del motor, no verificación del proveedor o número.' : 'PaddleOCR no encontró texto legible en esta foto.';
+      } catch (e) {
+        console.error('PaddleOCR experimental:', e);
+        paddleStatus.className = 'hint bad';
+        paddleStatus.textContent = 'No se pudo iniciar PaddleOCR. Revisa la conexión y vuelve a intentar; también puedes usar OCR local o Google Lens.';
+      } finally {
+        if (engine) { try { await engine.dispose(); } catch (e) { /* ignorar */ } }
+      }
+    });
+  };
+  const paddleButton = btn('Probar PaddleOCR (experimental)', { onClick: runPaddleOCR });
   const save = btn('Guardar borrador', { kind: 'primary block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); error.replaceChildren();
@@ -1539,7 +1571,7 @@ function openNewReceipt() {
     });
   } }, field('Foto de la boleta', photoPicker), field('Proveedor', supplier),
     h('div', { class: 'row2' }, field('N.º de boleta / factura', number), field('Fecha del documento', date)),
-    ocr, status, field('Texto de Lens u OCR (editable)', ocrText, 'Copia el texto con Google Lens y pégalo aquí. La app sugerirá proveedor y número; confirma todo contra la imagen.'), error, save);
+    ocr, status, field('Texto de Lens u OCR (editable)', ocrText, 'Copia el texto con Google Lens y pégalo aquí. La app sugerirá proveedor y número; confirma todo contra la imagen.'), paddleButton, paddleStatus, field('Resultado PaddleOCR para comparar', paddleText, 'Compara las líneas con la lectura anterior; los porcentajes son orientativos.'), error, save);
   openSheet('Nueva recepción', form);
 }
 async function openReceiptDetail(id) {
