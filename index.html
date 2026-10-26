@@ -1415,35 +1415,79 @@ function openReceiptList() {
   load();
 }
 
+function suggestReceiptHeader(text) {
+  const lines = String(text || '').split(/\r?\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const ignored = /\b(RUC|BOLETA|FACTURA|TICKET|COMPROBANTE|ELECTR[ÓO]NICA|DIRECCI[ÓO]N|CLIENTE|FECHA|TEL[EÉ]FONO|CANTIDAD|PRECIO|SUBTOTAL|TOTAL|IGV|CAJERO|VENDEDOR)\b/i;
+  const supplier = lines.slice(0, 10).find(line =>
+    line.length >= 4 && line.length <= 120 &&
+    /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(line) &&
+    !/^\d/.test(line) && !ignored.test(line)
+  ) || '';
+  const joined = lines.join('\n');
+  const numberPatterns = [
+    /\b([FB]\s*\d{3,4}\s*[-–]\s*\d{1,10})\b/i,
+    /\b(?:FACTURA|BOLETA|COMPROBANTE)(?:\s+ELECTR[ÓO]NICA)?\s*(?:N[°ºO.]?\s*)?[:#-]?\s*([A-Z0-9]{1,5}\s*[-–/]\s*\d{1,10})\b/i,
+    /\b(?:N[°ºO.]|NRO\.?|NÚMERO)\s*[:#-]?\s*([A-Z0-9]{1,5}\s*[-–/]\s*\d{1,10})\b/i,
+    /\b(?:N[°ºO.]|NRO\.?|NÚMERO)\s*[:#-]?\s*(\d{1,12})\b/i
+  ];
+  let documentNumber = '';
+  for (const pattern of numberPatterns) {
+    const match = joined.match(pattern);
+    if (match) { documentNumber = match[1].replace(/\s+/g, '').replace(/[–/]/g, '-'); break; }
+  }
+  return { supplier, documentNumber };
+}
+
 function openNewReceipt() {
   const photo = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment' });
   const supplier = h('input', { type: 'text', autocomplete: 'organization', placeholder: 'Nombre del proveedor', required: true });
   const number = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Opcional' });
   const date = h('input', { type: 'date' });
   const ocrText = h('textarea', { placeholder: 'El texto reconocido aparecerá aquí; corrígelo si hace falta.' });
-  const status = h('p', { class: 'hint', role: 'status' }, 'Toma una foto clara de toda la boleta. La imagen se guardará en el almacenamiento privado.');
+  const status = h('p', { class: 'hint', role: 'status' }, 'Al tomar o seleccionar la foto intentaré leer el proveedor y el número de boleta automáticamente. Revísalos antes de guardar.');
   const error = h('div', { role: 'alert' });
-  const ocr = btn('Leer texto de la boleta', { onClick: async () => {
+  let lastSupplierSuggestion = '', lastNumberSuggestion = '', readingPhoto = false;
+  const readPhoto = async () => {
     error.replaceChildren();
     const file = photo.files && photo.files[0];
-    if (!file) { status.className = 'hint bad'; status.textContent = 'Primero toma o selecciona una foto.'; return; }
+    if (!file) return;
     if (file.size > 10 * 1024 * 1024) { status.className = 'hint bad'; status.textContent = 'La foto supera 10 MB. Toma una foto con menor resolución.'; return; }
-    await busy(ocr, 'Leyendo…', async () => {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { status.className = 'hint bad'; status.textContent = 'El formato de la foto no es compatible. Usa JPG, PNG o WebP.'; return; }
+    if (readingPhoto) return;
+    readingPhoto = true;
+    photo.disabled = true;
+    await busy(ocr, 'Leyendo foto…', async () => {
       let worker;
       try {
+        status.className = 'hint'; status.textContent = 'Leyendo la foto para sugerir proveedor y número…';
         await ensureLib('ocr');
         worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
         const result = await worker.recognize(file);
         ocrText.value = (result.data.text || '').trim();
-        const first = ocrText.value.split(/\r?\n/).map(x => x.trim()).find(x => x.length >= 3 && !/^\d/.test(x));
-        if (!supplier.value.trim() && first) supplier.value = first.slice(0, 120);
-        status.className = 'hint warn';
-        status.textContent = 'Texto sugerido por OCR. Verifica proveedor, productos, cantidades y precios con la foto; el reconocimiento puede equivocarse.';
+        const suggested = suggestReceiptHeader(ocrText.value);
+        if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
+          supplier.value = suggested.supplier.slice(0, 120);
+          lastSupplierSuggestion = supplier.value;
+        }
+        if (suggested.documentNumber && (!number.value.trim() || number.value === lastNumberSuggestion)) {
+          number.value = suggested.documentNumber.slice(0, 80);
+          lastNumberSuggestion = number.value;
+        }
+        status.className = 'hint ' + (suggested.supplier || suggested.documentNumber ? 'warn' : '');
+        status.textContent = suggested.supplier || suggested.documentNumber
+          ? 'Datos sugeridos por OCR. Verifica proveedor y número con la boleta; puedes corregirlos.'
+          : 'Leí el texto, pero no pude identificar con seguridad el proveedor o el número. Puedes ingresarlos manualmente.';
       } catch (e) {
-        status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes continuar y revisar los datos manualmente.';
-      } finally { if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } } }
+        status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes continuar y completar los datos manualmente.';
+      } finally {
+        if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } }
+        photo.disabled = false;
+        readingPhoto = false;
+      }
     });
-  } });
+  };
+  const ocr = btn('Leer texto otra vez', { onClick: readPhoto });
+  photo.addEventListener('change', readPhoto);
   const save = btn('Guardar borrador', { kind: 'primary block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); error.replaceChildren();
@@ -1470,7 +1514,6 @@ function openNewReceipt() {
     ocr, status, field('Texto reconocido (editable)', ocrText, 'El OCR es una referencia; confirma cada dato contra la imagen.'), error, save);
   openSheet('Nueva recepción', form);
 }
-
 async function openReceiptDetail(id) {
   const body = h('div', h('p', { class: 'muted' }, 'Cargando…'));
   openSheet('Recepción', body, { focus: false });
