@@ -742,6 +742,7 @@ function productRow(p, onClick) {
 
 function viewScan() {
   const wrap = h('div');
+  wrap.append(btn('Registrar recepción de compra', { kind: 'primary block', onClick: openReceiptList }));
   const cta = h('button', { class: 'scan-cta', type: 'button', onClick: () => startScan() },
     h('span', { class: 'bars', 'aria-hidden': 'true' }),
     h('span', { class: 'txt' }, h('b', null, 'Escanear código'), h('span', null, 'Usa la cámara del celular')));
