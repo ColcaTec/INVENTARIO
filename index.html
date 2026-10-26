@@ -1438,96 +1438,55 @@ function suggestReceiptHeader(text) {
   return { supplier, documentNumber };
 }
 
-async function compressReceiptImage(file) {
-  if (typeof createImageBitmap !== 'function') throw new Error('Este navegador no puede preparar la foto.');
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2200 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  if (bitmap.close) bitmap.close();
-  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.84));
-  if (!blob) throw new Error('No se pudo preparar la foto.');
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  return btoa(binary);
-}
-
 function openNewReceipt() {
   const photo = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment' });
   const supplier = h('input', { type: 'text', autocomplete: 'organization', placeholder: 'Nombre del proveedor', required: true });
   const number = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Opcional' });
   const date = h('input', { type: 'date' });
   const ocrText = h('textarea', { placeholder: 'El texto reconocido aparecerá aquí; corrígelo si hace falta.' });
-  const status = h('p', { class: 'hint', role: 'status' }, 'Al tomar o seleccionar la foto intentaré leer el proveedor y el número de boleta automáticamente. Revísalos antes de guardar.');
+  const status = h('p', { class: 'hint', role: 'status' }, 'Usa Google Lens para copiar el texto de esta foto y pégalo abajo. La app sugerirá proveedor y número; revísalos. Si prefieres, puedes probar el OCR local.');
   const error = h('div', { role: 'alert' });
   let lastSupplierSuggestion = '', lastNumberSuggestion = '', readingPhoto = false;
+  const applyTextSuggestions = () => {
+    const suggested = suggestReceiptHeader(ocrText.value);
+    let changed = false;
+    if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
+      supplier.value = suggested.supplier.slice(0, 120);
+      lastSupplierSuggestion = supplier.value;
+      changed = true;
+    }
+    if (suggested.documentNumber && (!number.value.trim() || number.value === lastNumberSuggestion)) {
+      number.value = suggested.documentNumber.slice(0, 80);
+      lastNumberSuggestion = number.value;
+      changed = true;
+    }
+    if (changed && !readingPhoto) {
+      status.className = 'hint warn';
+      status.textContent = 'Datos sugeridos del texto. Verifica el nombre y número contra la foto; puedes corregirlos.';
+    }
+  };
   const readPhoto = async () => {
     error.replaceChildren();
     const file = photo.files && photo.files[0];
-    if (!file) return;
+    if (!file) { status.className = 'hint bad'; status.textContent = 'Primero toma o selecciona una foto.'; return; }
     if (file.size > 10 * 1024 * 1024) { status.className = 'hint bad'; status.textContent = 'La foto supera 10 MB. Toma una foto con menor resolución.'; return; }
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { status.className = 'hint bad'; status.textContent = 'El formato de la foto no es compatible. Usa JPG, PNG o WebP.'; return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { status.className = 'hint bad'; status.textContent = 'Usa una foto JPG, PNG o WebP.'; return; }
     if (readingPhoto) return;
     readingPhoto = true;
     photo.disabled = true;
-    await busy(ocr, 'Leyendo foto…', async () => {
+    await busy(ocr, 'Leyendo…', async () => {
       let worker;
-      let usedLocalFallback = false;
       try {
-        status.className = 'hint'; status.textContent = 'Analizando boleta con Document AI…';
-        const ocrImage = await compressReceiptImage(file);
-        const { data, error: callError } = await S.sb.functions.invoke('receipt-ocr', {
-          body: { imageBase64: ocrImage, mimeType: 'image/jpeg' }
-        });
-        if (callError) throw callError;
-        if (!data || !data.ok) throw new Error((data && data.error) || 'Document AI no devolvió datos.');
-        ocrText.value = String(data.text || '').trim();
-        const suggested = {
-          supplier: String(data.supplierName || ''),
-          documentNumber: String(data.documentNumber || '')
-        };
-        if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
-          supplier.value = suggested.supplier.slice(0, 120);
-          lastSupplierSuggestion = supplier.value;
-        }
-        if (suggested.documentNumber && (!number.value.trim() || number.value === lastNumberSuggestion)) {
-          number.value = suggested.documentNumber.slice(0, 80);
-          lastNumberSuggestion = number.value;
-        }
-        const confidence = Math.min(
-          suggested.supplier ? Number(data.supplierConfidence || 0) : 1,
-          suggested.documentNumber ? Number(data.documentNumberConfidence || 0) : 1
-        );
-        status.className = 'hint ' + (confidence < 0.65 ? 'warn' : 'ok');
-        status.textContent = suggested.supplier || suggested.documentNumber
-          ? 'Document AI hizo sugerencias. Revisa el nombre y número contra la boleta antes de guardar.'
-          : 'Leí la boleta, pero no detecté proveedor o número. Puedes completarlos manualmente.';
-      } catch (cloudError) {
-        usedLocalFallback = true;
-        status.className = 'hint'; status.textContent = 'Document AI no está disponible; probaré el OCR local…';
-        try {
-          await ensureLib('ocr');
-          worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR local: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
-          const result = await worker.recognize(file);
-          ocrText.value = (result.data.text || '').trim();
-          const suggested = suggestReceiptHeader(ocrText.value);
-          if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
-            supplier.value = suggested.supplier.slice(0, 120);
-            lastSupplierSuggestion = supplier.value;
-          }
-          if (suggested.documentNumber && (!number.value.trim() || number.value === lastNumberSuggestion)) {
-            number.value = suggested.documentNumber.slice(0, 80);
-            lastNumberSuggestion = number.value;
-          }
-          status.className = 'hint warn';
-          status.textContent = 'Se usó OCR local como alternativa; revisa o corrige todos los datos antes de guardar.';
-        } catch (localError) {
-          status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes completar los datos manualmente.';
-        }
+        status.className = 'hint'; status.textContent = 'Leyendo la foto con OCR local…';
+        await ensureLib('ocr');
+        worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR local: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
+        const result = await worker.recognize(file);
+        ocrText.value = (result.data.text || '').trim();
+        applyTextSuggestions();
+        status.className = 'hint warn';
+        status.textContent = 'OCR local terminado. Revisa los campos o pega el texto de Google Lens si reconoció mejor la boleta.';
+      } catch (e) {
+        status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto localmente. Puedes pegar aquí el texto copiado desde Google Lens y completar los datos manualmente.';
       } finally {
         if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } }
         photo.disabled = false;
@@ -1535,8 +1494,8 @@ function openNewReceipt() {
       }
     });
   };
-  const ocr = btn('Leer texto otra vez', { onClick: readPhoto });
-  photo.addEventListener('change', readPhoto);
+  ocrText.addEventListener('input', applyTextSuggestions);
+  const ocr = btn('Leer texto con OCR local', { onClick: readPhoto });
   const save = btn('Guardar borrador', { kind: 'primary block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); error.replaceChildren();
@@ -1560,7 +1519,7 @@ function openNewReceipt() {
     });
   } }, field('Foto de la boleta', photo), field('Proveedor', supplier),
     h('div', { class: 'row2' }, field('N.º de boleta / factura', number), field('Fecha del documento', date)),
-    ocr, status, field('Texto reconocido (editable)', ocrText, 'El OCR es una referencia; confirma cada dato contra la imagen.'), error, save);
+    ocr, status, field('Texto de Lens u OCR (editable)', ocrText, 'Copia el texto con Google Lens y pégalo aquí. La app sugerirá proveedor y número; confirma todo contra la imagen.'), error, save);
   openSheet('Nueva recepción', form);
 }
 async function openReceiptDetail(id) {
