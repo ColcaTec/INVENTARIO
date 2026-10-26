@@ -1438,6 +1438,24 @@ function suggestReceiptHeader(text) {
   return { supplier, documentNumber };
 }
 
+async function compressReceiptImage(file) {
+  if (typeof createImageBitmap !== 'function') throw new Error('Este navegador no puede preparar la foto.');
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 2200 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if (bitmap.close) bitmap.close();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.84));
+  if (!blob) throw new Error('No se pudo preparar la foto.');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(binary);
+}
+
 function openNewReceipt() {
   const photo = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment' });
   const supplier = h('input', { type: 'text', autocomplete: 'organization', placeholder: 'Nombre del proveedor', required: true });
@@ -1458,13 +1476,20 @@ function openNewReceipt() {
     photo.disabled = true;
     await busy(ocr, 'Leyendo foto…', async () => {
       let worker;
+      let usedLocalFallback = false;
       try {
-        status.className = 'hint'; status.textContent = 'Leyendo la foto para sugerir proveedor y número…';
-        await ensureLib('ocr');
-        worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
-        const result = await worker.recognize(file);
-        ocrText.value = (result.data.text || '').trim();
-        const suggested = suggestReceiptHeader(ocrText.value);
+        status.className = 'hint'; status.textContent = 'Analizando boleta con Document AI…';
+        const ocrImage = await compressReceiptImage(file);
+        const { data, error: callError } = await S.sb.functions.invoke('receipt-ocr', {
+          body: { imageBase64: ocrImage, mimeType: 'image/jpeg' }
+        });
+        if (callError) throw callError;
+        if (!data || !data.ok) throw new Error((data && data.error) || 'Document AI no devolvió datos.');
+        ocrText.value = String(data.text || '').trim();
+        const suggested = {
+          supplier: String(data.supplierName || ''),
+          documentNumber: String(data.documentNumber || '')
+        };
         if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
           supplier.value = suggested.supplier.slice(0, 120);
           lastSupplierSuggestion = supplier.value;
@@ -1473,12 +1498,36 @@ function openNewReceipt() {
           number.value = suggested.documentNumber.slice(0, 80);
           lastNumberSuggestion = number.value;
         }
-        status.className = 'hint ' + (suggested.supplier || suggested.documentNumber ? 'warn' : '');
+        const confidence = Math.min(
+          suggested.supplier ? Number(data.supplierConfidence || 0) : 1,
+          suggested.documentNumber ? Number(data.documentNumberConfidence || 0) : 1
+        );
+        status.className = 'hint ' + (confidence < 0.65 ? 'warn' : 'ok');
         status.textContent = suggested.supplier || suggested.documentNumber
-          ? 'Datos sugeridos por OCR. Verifica proveedor y número con la boleta; puedes corregirlos.'
-          : 'Leí el texto, pero no pude identificar con seguridad el proveedor o el número. Puedes ingresarlos manualmente.';
-      } catch (e) {
-        status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes continuar y completar los datos manualmente.';
+          ? 'Document AI hizo sugerencias. Revisa el nombre y número contra la boleta antes de guardar.'
+          : 'Leí la boleta, pero no detecté proveedor o número. Puedes completarlos manualmente.';
+      } catch (cloudError) {
+        usedLocalFallback = true;
+        status.className = 'hint'; status.textContent = 'Document AI no está disponible; probaré el OCR local…';
+        try {
+          await ensureLib('ocr');
+          worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR local: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
+          const result = await worker.recognize(file);
+          ocrText.value = (result.data.text || '').trim();
+          const suggested = suggestReceiptHeader(ocrText.value);
+          if (suggested.supplier && (!supplier.value.trim() || supplier.value === lastSupplierSuggestion)) {
+            supplier.value = suggested.supplier.slice(0, 120);
+            lastSupplierSuggestion = supplier.value;
+          }
+          if (suggested.documentNumber && (!number.value.trim() || number.value === lastNumberSuggestion)) {
+            number.value = suggested.documentNumber.slice(0, 80);
+            lastNumberSuggestion = number.value;
+          }
+          status.className = 'hint warn';
+          status.textContent = 'Se usó OCR local como alternativa; revisa o corrige todos los datos antes de guardar.';
+        } catch (localError) {
+          status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes completar los datos manualmente.';
+        }
       } finally {
         if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } }
         photo.disabled = false;
