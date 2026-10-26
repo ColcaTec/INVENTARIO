@@ -1439,7 +1439,23 @@ function suggestReceiptHeader(text) {
 }
 
 function openNewReceipt() {
-  const photo = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment' });
+  const galleryInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', class: 'sr', 'aria-label': 'Elegir foto guardada' });
+  const cameraInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment', class: 'sr', 'aria-label': 'Tomar foto de la boleta' });
+  const photoName = h('p', { class: 'small muted', role: 'status' }, 'No has seleccionado una foto.');
+  let selectedPhoto = null;
+  const chooseGallery = btn('Subir foto desde galería', { kind: 'block', onClick: () => galleryInput.click() });
+  const takePhoto = btn('Tomar foto', { kind: 'block', onClick: () => cameraInput.click() });
+  const setSelectedPhoto = input => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    selectedPhoto = file;
+    photoName.textContent = 'Foto seleccionada: ' + (file.name || 'boleta');
+    input.value = '';
+  };
+  galleryInput.addEventListener('change', () => setSelectedPhoto(galleryInput));
+  cameraInput.addEventListener('change', () => setSelectedPhoto(cameraInput));
+  const photoPicker = h('div', null, galleryInput, cameraInput, h('div', { class: 'row2' }, chooseGallery, takePhoto), photoName,
+    h('p', { class: 'hint' }, 'Formatos: JPG, PNG o WebP. Tamaño máximo: 10 MB.'));
   const supplier = h('input', { type: 'text', autocomplete: 'organization', placeholder: 'Nombre del proveedor', required: true });
   const number = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Opcional' });
   const date = h('input', { type: 'date' });
@@ -1467,13 +1483,13 @@ function openNewReceipt() {
   };
   const readPhoto = async () => {
     error.replaceChildren();
-    const file = photo.files && photo.files[0];
+    const file = selectedPhoto;
     if (!file) { status.className = 'hint bad'; status.textContent = 'Primero toma o selecciona una foto.'; return; }
     if (file.size > 10 * 1024 * 1024) { status.className = 'hint bad'; status.textContent = 'La foto supera 10 MB. Toma una foto con menor resolución.'; return; }
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { status.className = 'hint bad'; status.textContent = 'Usa una foto JPG, PNG o WebP.'; return; }
     if (readingPhoto) return;
     readingPhoto = true;
-    photo.disabled = true;
+    chooseGallery.disabled = true; takePhoto.disabled = true;
     await busy(ocr, 'Leyendo…', async () => {
       let worker;
       try {
@@ -1489,7 +1505,7 @@ function openNewReceipt() {
         status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto localmente. Puedes pegar aquí el texto copiado desde Google Lens y completar los datos manualmente.';
       } finally {
         if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } }
-        photo.disabled = false;
+        chooseGallery.disabled = false; takePhoto.disabled = false;
         readingPhoto = false;
       }
     });
@@ -1499,8 +1515,8 @@ function openNewReceipt() {
   const save = btn('Guardar borrador', { kind: 'primary block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); error.replaceChildren();
-    const file = photo.files && photo.files[0];
-    if (!file) { error.append(h('p', { class: 'msg bad' }, 'Adjunta la foto de la boleta para continuar.')); photo.focus(); return; }
+    const file = selectedPhoto;
+    if (!file) { error.append(h('p', { class: 'msg bad' }, 'Adjunta la foto de la boleta para continuar.')); chooseGallery.focus(); return; }
     if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 10 * 1024 * 1024) { error.append(h('p', { class: 'msg bad' }, 'Usa una foto JPG, PNG o WebP de hasta 10 MB.')); return; }
     if (!supplier.value.trim()) { error.append(h('p', { class: 'msg bad' }, 'Escribe o corrige el nombre del proveedor.')); supplier.focus(); return; }
     await busy(save, 'Guardando…', async () => {
@@ -1517,7 +1533,7 @@ function openNewReceipt() {
         await closeOverlay(1); openReceiptDetail(rec.id);
       } catch (e) { error.replaceChildren(h('p', { class: 'msg bad' }, friendly(e))); }
     });
-  } }, field('Foto de la boleta', photo), field('Proveedor', supplier),
+  } }, field('Foto de la boleta', photoPicker), field('Proveedor', supplier),
     h('div', { class: 'row2' }, field('N.º de boleta / factura', number), field('Fecha del documento', date)),
     ocr, status, field('Texto de Lens u OCR (editable)', ocrText, 'Copia el texto con Google Lens y pégalo aquí. La app sugerirá proveedor y número; confirma todo contra la imagen.'), error, save);
   openSheet('Nueva recepción', form);
