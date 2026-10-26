@@ -1527,11 +1527,19 @@ function openNewReceipt() {
       let engine;
       try {
         paddleStatus.className = 'hint'; paddleStatus.textContent = 'Cargando PaddleOCR y sus modelos (primera vez puede tardar)…';
-        const { PaddleOCR } = await import('https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle');
+        let PaddleOCR, sdkLoadError;
+        for (const sdkUrl of [
+          'https://esm.sh/@paddleocr/paddleocr-js@0.4.2?bundle',
+          'https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm'
+        ]) {
+          try { ({ PaddleOCR } = await import(sdkUrl)); break; }
+          catch (e) { sdkLoadError = e; }
+        }
+        if (!PaddleOCR) throw sdkLoadError || new Error('No se pudo cargar el SDK.');
         engine = await PaddleOCR.create({
           lang: 'es',
-          ocrVersion: 'PP-OCRv5',
-          ortOptions: { backend: 'wasm', wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/' }
+          ocrVersion: 'PP-OCRv6',
+          ortOptions: { backend: 'wasm' }
         });
         paddleStatus.textContent = 'Leyendo la boleta con PaddleOCR…';
         const [result] = await engine.predict(file);
@@ -1541,7 +1549,8 @@ function openNewReceipt() {
       } catch (e) {
         console.error('PaddleOCR experimental:', e);
         paddleStatus.className = 'hint bad';
-        paddleStatus.textContent = 'No se pudo iniciar PaddleOCR. Revisa la conexión y vuelve a intentar; también puedes usar OCR local o Google Lens.';
+        const reason = String(e && e.message || e || 'error desconocido').replace(/https?:\/\/\S+/g, '[URL]').slice(0, 180);
+        paddleStatus.textContent = 'Falló PaddleOCR: ' + reason + '. Puedes usar OCR local o Google Lens.';
       } finally {
         if (engine) { try { await engine.dispose(); } catch (e) { /* ignorar */ } }
       }
