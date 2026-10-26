@@ -238,7 +238,7 @@ body.has-sheet .toast{bottom:24px}
 'use strict';
 
 const CFG = window.INVENTARIO_CONFIG || {};
-const VERSION = 'Fase 1 · versión 1.0';
+const VERSION = 'Fase 2 · Recepción de compras';
 
 /* =====================================================================
    Utilidades
@@ -396,6 +396,13 @@ const LIBS = {
     urls: [
       'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
       'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
+    ],
+  },
+  ocr: {
+    ok: () => window.Tesseract && typeof window.Tesseract.createWorker === 'function',
+    urls: [
+      'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js',
+      'https://unpkg.com/tesseract.js@6.0.1/dist/tesseract.min.js',
     ],
   },
 };
@@ -1384,6 +1391,208 @@ function viewHistory() {
 }
 
 /* =====================================================================
+   Recepción de compras
+   ===================================================================== */
+function openReceiptList() {
+  const body = h('div', h('p', { class: 'muted' }, 'Cargando recepciones…'));
+  openSheet('Recepciones', body, { focus: false });
+  const load = async () => {
+    const { data, error } = await S.sb.from('purchase_receipts')
+      .select('id,supplier_name,document_number,status,created_at,confirmed_at')
+      .order('created_at', { ascending: false }).limit(50);
+    if (error) { body.replaceChildren(h('p', { class: 'msg bad' }, friendly(error))); return; }
+    body.replaceChildren(
+      h('p', { class: 'msg info' }, 'Registra la boleta, revisa cada producto y su vencimiento, cuenta una muestra aleatoria del stock y confirma la recepción completa.'),
+      btn('Nueva recepción', { kind: 'primary block', onClick: async () => { await closeOverlay(1); openNewReceipt(); } }),
+      h('h3', { class: 'section-title' }, 'Recientes'),
+      data.length ? h('div', { class: 'list' }, data.map(r => h('button', { class: 'row', type: 'button', onClick: () => openReceiptDetail(r.id) },
+        h('div', { class: 'grow' }, h('div', { class: 'name' }, r.supplier_name),
+          h('div', { class: 'meta' }, [r.document_number, new Date(r.created_at).toLocaleDateString('es-PE')].filter(Boolean).join(' · '))),
+        h('span', { class: 'badge ' + (r.status === 'confirmada' ? 'ok' : 'warn') }, r.status === 'confirmada' ? 'Confirmada' : 'Borrador'))))
+        : h('div', { class: 'empty' }, h('b', null, 'Aún no hay recepciones'), 'Toca “Nueva recepción” para registrar una compra.'));
+  };
+  load();
+}
+
+function openNewReceipt() {
+  const photo = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', capture: 'environment' });
+  const supplier = h('input', { type: 'text', autocomplete: 'organization', placeholder: 'Nombre del proveedor', required: true });
+  const number = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Opcional' });
+  const date = h('input', { type: 'date' });
+  const ocrText = h('textarea', { placeholder: 'El texto reconocido aparecerá aquí; corrígelo si hace falta.' });
+  const status = h('p', { class: 'hint', role: 'status' }, 'Toma una foto clara de toda la boleta. La imagen se guardará en el almacenamiento privado.');
+  const error = h('div', { role: 'alert' });
+  const ocr = btn('Leer texto de la boleta', { onClick: async () => {
+    error.replaceChildren();
+    const file = photo.files && photo.files[0];
+    if (!file) { status.className = 'hint bad'; status.textContent = 'Primero toma o selecciona una foto.'; return; }
+    if (file.size > 10 * 1024 * 1024) { status.className = 'hint bad'; status.textContent = 'La foto supera 10 MB. Toma una foto con menor resolución.'; return; }
+    await busy(ocr, 'Leyendo…', async () => {
+      let worker;
+      try {
+        await ensureLib('ocr');
+        worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
+        const result = await worker.recognize(file);
+        ocrText.value = (result.data.text || '').trim();
+        const first = ocrText.value.split(/\r?\n/).map(x => x.trim()).find(x => x.length >= 3 && !/^\d/.test(x));
+        if (!supplier.value.trim() && first) supplier.value = first.slice(0, 120);
+        status.className = 'hint warn';
+        status.textContent = 'Texto sugerido por OCR. Verifica proveedor, productos, cantidades y precios con la foto; el reconocimiento puede equivocarse.';
+      } catch (e) {
+        status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto. Puedes continuar y revisar los datos manualmente.';
+      } finally { if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } } }
+    });
+  } });
+  const save = btn('Guardar borrador', { kind: 'primary block' });
+  const form = h('form', { onSubmit: async ev => {
+    ev.preventDefault(); error.replaceChildren();
+    const file = photo.files && photo.files[0];
+    if (!file) { error.append(h('p', { class: 'msg bad' }, 'Adjunta la foto de la boleta para continuar.')); photo.focus(); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 10 * 1024 * 1024) { error.append(h('p', { class: 'msg bad' }, 'Usa una foto JPG, PNG o WebP de hasta 10 MB.')); return; }
+    if (!supplier.value.trim()) { error.append(h('p', { class: 'msg bad' }, 'Escribe o corrige el nombre del proveedor.')); supplier.focus(); return; }
+    await busy(save, 'Guardando…', async () => {
+      try {
+        const { data: sup, error: se } = await S.sb.from('suppliers').upsert({ name: supplier.value.trim() }, { onConflict: 'name' }).select('id').single();
+        if (se) throw se;
+        const { data: rec, error: re } = await S.sb.from('purchase_receipts').insert({ supplier_id: sup.id, supplier_name: supplier.value.trim(), document_number: number.value.trim() || null, document_date: date.value || null, ocr_text: ocrText.value.trim() || null }).select('id').single();
+        if (re) throw re;
+        const path = `${S.me.id}/${rec.id}.${file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'}`;
+        const { error: ue } = await S.sb.storage.from('recepcion-boletas').upload(path, file, { contentType: file.type, upsert: false });
+        if (ue) throw ue;
+        const { error: pe } = await S.sb.from('purchase_receipts').update({ image_path: path }).eq('id', rec.id);
+        if (pe) throw pe;
+        await closeOverlay(1); openReceiptDetail(rec.id);
+      } catch (e) { error.replaceChildren(h('p', { class: 'msg bad' }, friendly(e))); }
+    });
+  } }, field('Foto de la boleta', photo), field('Proveedor', supplier),
+    h('div', { class: 'row2' }, field('N.º de boleta / factura', number), field('Fecha del documento', date)),
+    ocr, status, field('Texto reconocido (editable)', ocrText, 'El OCR es una referencia; confirma cada dato contra la imagen.'), error, save);
+  openSheet('Nueva recepción', form);
+}
+
+async function openReceiptDetail(id) {
+  const body = h('div', h('p', { class: 'muted' }, 'Cargando…'));
+  openSheet('Recepción', body, { focus: false });
+  const draw = async () => {
+    const { data: receipt, error: re } = await S.sb.from('purchase_receipts').select('*').eq('id', id).single();
+    if (re) { body.replaceChildren(h('p', { class: 'msg bad' }, friendly(re))); return; }
+    const { data: lines, error: le } = await S.sb.from('purchase_receipt_lines').select('*,products(name,unit,has_expiry,barcode),locations(name)').eq('receipt_id', id).order('created_at');
+    const { data: audits, error: ae } = await S.sb.from('purchase_receipt_audits').select('*,products(name,unit),locations(name,sort)').eq('receipt_id', id).order('id');
+    if (le || ae) { body.replaceChildren(h('p', { class: 'msg bad' }, friendly(le || ae))); return; }
+    const confirmed = receipt.status === 'confirmada';
+    const header = h('div', { class: 'panel', style: 'margin-bottom:14px' },
+      h('div', { style: 'font-weight:700;font-size:18px' }, receipt.supplier_name),
+      h('div', { class: 'small muted' }, [receipt.document_number, receipt.document_date ? fmtDate(receipt.document_date) : null].filter(Boolean).join(' · ') || 'Sin número o fecha de documento'),
+      h('span', { class: 'badge ' + (confirmed ? 'ok' : 'warn'), style: 'margin-top:8px' }, confirmed ? 'Recepción confirmada' : 'Borrador'));
+    const parts = [header];
+    if (receipt.image_path) {
+      const { data: signed } = await S.sb.storage.from('recepcion-boletas').createSignedUrl(receipt.image_path, 3600);
+      if (signed && signed.signedUrl) parts.push(h('details', { style: 'margin-bottom:14px' }, h('summary', { class: 'btn block' }, 'Ver foto de la boleta'), h('img', { src: signed.signedUrl, alt: 'Foto de la boleta', style: 'display:block;width:100%;height:auto;margin-top:8px;border-radius:10px' })));
+    }
+    if (receipt.ocr_text) parts.push(h('details', { style: 'margin-bottom:14px' }, h('summary', { class: 'btn block' }, 'Ver texto OCR'), h('pre', { class: 'panel', style: 'white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8px' }, receipt.ocr_text)));
+    parts.push(h('h3', { class: 'section-title' }, `Productos recibidos (${lines.length})`));
+    if (lines.length) parts.push(h('div', { class: 'list' }, lines.map(line => h('div', { class: 'row', style: 'cursor:default' },
+      h('div', { class: 'grow' }, h('div', { class: 'name' }, line.products.name),
+        h('div', { class: 'meta', style: 'white-space:normal' }, `Boleta: ${fmtQty(line.expected_quantity)} · Llegó: ${fmtQty(line.received_quantity)} ${line.products.unit} · ${line.locations.name}`),
+        h('div', { class: 'meta' }, [line.expiry_date ? 'Vence ' + fmtDate(line.expiry_date) : 'Sin vencimiento', line.unit_cost != null ? 'Costo ' + fmtMoney(line.unit_cost) : null, line.note].filter(Boolean).join(' · '))),
+      !confirmed && !receipt.audit_started_at ? h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Quitar producto', onClick: async () => { const { error } = await S.sb.from('purchase_receipt_lines').delete().eq('id', line.id); if (error) toast(friendly(error), 'bad'); else draw(); } }, '×') : null))));
+    if (!confirmed && !receipt.audit_started_at) parts.push(addReceiptLine(id, draw));
+    parts.push(h('h3', { class: 'section-title' }, 'Conteo aleatorio antes de ingresar la compra'));
+    if (confirmed) {
+      parts.push(h('p', { class: 'msg info' }, 'La recepción ya actualizó el stock. Los conteos quedaron guardados en el historial de recepción.'));
+    } else if (!audits.length && receipt.audit_started_at) {
+      parts.push(h('p', { class: 'msg info' }, 'No había productos con stock fuera de esta recepción para seleccionar. El control quedó registrado.'));
+    } else if (!audits.length) {
+      parts.push(h('p', { class: 'small muted' }, 'La app elegirá al azar entre 1 y 3 productos que ya tienen stock, excluyendo los de esta compra. Se compararán estante y almacén antes de confirmar.'));
+      const readyForAudit = lines.length > 0 && lines.every(l => l.reviewed);
+      parts.push(btn('Elegir productos y comenzar conteo', { kind: 'block', disabled: !readyForAudit, onClick: async () => { const { error } = await S.sb.rpc('iniciar_control_recepcion', { p_receipt: id }); if (error) toast(friendly(error), 'bad'); else draw(); } }));
+    } else {
+      parts.push(h('p', { class: 'msg info' }, 'Cuenta lo que hay físicamente en cada ubicación antes de sumar esta compra. Si hay una diferencia, explica el motivo; este control no modifica el stock.'), receiptAuditForm(id, audits, draw));
+    }
+    if (!confirmed && receipt.audit_started_at) parts.push(h('p', { class: 'hint' }, 'El conteo aleatorio ya comenzó; las líneas de la compra quedaron bloqueadas para mantener válida la muestra.'));
+    if (!confirmed) {
+      const allReviewed = lines.length > 0 && lines.every(l => l.reviewed);
+      const auditsComplete = !!receipt.audit_started_at && (audits.length === 0 || audits.every(a => a.counted_quantity != null && (Number(a.counted_quantity) === Number(a.expected_quantity) || (a.note || '').trim().length >= 3)));
+      parts.push(h('div', { style: 'margin-top:18px' }, btn('Confirmar y sumar al inventario', { kind: 'primary block', disabled: !allReviewed || !auditsComplete, onClick: async ev => {
+        await busy(ev.currentTarget, 'Confirmando…', async () => {
+          const { error } = await S.sb.rpc('confirmar_recepcion', { p_receipt: id });
+          if (error) { toast(friendly(error), 'bad'); return; }
+          await refreshProducts(); toast('Recepción confirmada y stock actualizado', 'ok'); await draw();
+        });
+      } })), h('p', { class: 'hint' }, !allReviewed ? 'Añade y revisa al menos un producto antes de confirmar.' : !auditsComplete ? 'Inicia y completa el conteo aleatorio; explica cualquier diferencia.' : 'La recepción y todos sus movimientos se guardarán juntos.'));
+    }
+    body.replaceChildren(...parts);
+  };
+  await draw();
+}
+
+function addReceiptLine(receiptId, redraw) {
+  const product = h('select', null, h('option', { value: '' }, 'Elige el producto…'), activeProducts().map(p => h('option', { value: p.product_id }, `${p.name}${p.barcode ? ' · ' + p.barcode : ''}`)));
+  const scan = btn('Escanear código', { onClick: () => startScan({ onCode: async code => {
+    let p = findByCode(code);
+    if (!p) { try { await refreshProducts(); p = findByCode(code); } catch (e) { /* mostrar como desconocido */ } }
+    if (p) product.value = p.product_id;
+    else { toast('Completa los datos del producto nuevo para continuar la recepción.', 'warn'); openProductForm(null, { barcode: code }, async () => { await refreshProducts(); const found = findByCode(code); if (found) { product.append(h('option', { value: found.product_id }, `${found.name}${found.barcode ? ' · ' + found.barcode : ''}`)); product.value = found.product_id; } }); }
+  } }) });
+  const expected = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Cantidad en boleta' });
+  const received = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Cantidad contada' });
+  const expiry = h('input', { type: 'date' });
+  const location = locSelect('loc_recepcion', 'almacen');
+  const cost = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Costo por unidad (S/)' });
+  const note = h('input', { type: 'text', placeholder: 'Obligatorio si hay diferencia' });
+  const err = h('div', { role: 'alert' });
+  const save = btn('Guardar producto revisado', { kind: 'block' });
+  const form = h('form', { onSubmit: async ev => {
+    ev.preventDefault(); err.replaceChildren();
+    const p = byId(product.value), eq = parseQty(expected.value), rq = parseQty(received.value), c = parseMoney(cost.value);
+    if (!p) { err.append(h('p', { class: 'msg bad' }, 'Selecciona o escanea un producto.')); product.focus(); return; }
+    if (!(eq > 0) || !Number.isFinite(rq) || rq < 0) { err.append(h('p', { class: 'msg bad' }, 'Ingresa la cantidad de la boleta y la cantidad recibida (puede ser cero).')); return; }
+    if (Number.isNaN(c)) { err.append(h('p', { class: 'msg bad' }, 'El costo no es válido.')); cost.focus(); return; }
+    if (p.has_expiry && !expiry.value) { err.append(h('p', { class: 'msg bad' }, 'Este producto requiere fecha de vencimiento.')); expiry.focus(); return; }
+    if (eq !== rq && note.value.trim().length < 3) { err.append(h('p', { class: 'msg bad' }, 'Explica por qué no coincide la boleta con lo recibido.')); note.focus(); return; }
+    await busy(save, 'Guardando…', async () => {
+      const row = { receipt_id: receiptId, product_id: p.product_id, location_id: location.value, expected_quantity: eq, received_quantity: rq, unit_cost: c, expiry_date: p.has_expiry ? expiry.value : null, reviewed: true, note: note.value.trim() || null };
+      const { error } = await S.sb.from('purchase_receipt_lines').insert(row);
+      if (error) { err.append(h('p', { class: 'msg bad' }, friendly(error))); return; }
+      await redraw();
+    });
+  } }, field('Producto', product), scan,
+    h('div', { class: 'row2' }, field('Cantidad en boleta', expected), field('Cantidad que llegó', received)),
+    h('div', { class: 'row2' }, field('Fecha de vencimiento', expiry), field('Dónde se guarda', location)),
+    field('Costo por unidad (S/)', cost), field('Nota de diferencia', note), err, save);
+  return h('div', { class: 'panel', style: 'margin-top:12px' }, h('h3', { style: 'margin-bottom:12px' }, 'Añadir producto desde la boleta'), form);
+}
+
+function receiptAuditForm(receiptId, audits, redraw) {
+  const fields = audits.map(a => {
+    const count = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Cantidad contada', value: a.counted_quantity == null ? '' : String(a.counted_quantity) });
+    const note = h('input', { type: 'text', placeholder: Number(a.counted_quantity) !== Number(a.expected_quantity) ? 'Explica la diferencia' : 'Nota opcional', value: a.note || '' });
+    return { a, count, note, el: h('div', { class: 'panel', style: 'margin-bottom:10px' },
+      h('div', { style: 'font-weight:600' }, `${a.products.name} · ${a.locations.name}`),
+      h('p', { class: 'small muted', style: 'margin:4px 0 8px' }, `Según el sistema hay ${fmtQty(a.expected_quantity)} ${a.products.unit}.`),
+      field('Conteo físico', count), field('Nota de diferencia', note)) };
+  });
+  const err = h('div', { role: 'alert' });
+  const save = btn('Guardar conteo aleatorio', { kind: 'block' });
+  const form = h('form', { onSubmit: async ev => {
+    ev.preventDefault(); err.replaceChildren();
+    for (const x of fields) {
+      const q = parseQty(x.count.value);
+      if (!Number.isFinite(q) || q < 0) { err.append(h('p', { class: 'msg bad' }, 'Completa cada conteo con una cantidad igual o mayor que cero.')); x.count.focus(); return; }
+      if (q !== Number(x.a.expected_quantity) && x.note.value.trim().length < 3) { err.append(h('p', { class: 'msg bad' }, 'Explica cada diferencia del conteo.')); x.note.focus(); return; }
+    }
+    await busy(save, 'Guardando…', async () => {
+      for (const x of fields) {
+        const { error } = await S.sb.from('purchase_receipt_audits').update({ counted_quantity: parseQty(x.count.value), note: x.note.value.trim() || null }).eq('id', x.a.id);
+        if (error) { err.append(h('p', { class: 'msg bad' }, friendly(error))); return; }
+      }
+      await redraw();
+    });
+  } }, ...fields.map(x => x.el), err, save);
+  return form;
+}
+
+/* =====================================================================
    Pestaña: Más
    ===================================================================== */
 function viewMore() {
@@ -1393,6 +1602,7 @@ function viewMore() {
     h('div', { class: 'muted' }, isOwner() ? 'Dueño' : 'Empleado'),
     h('div', { class: 'small muted', style: 'margin-top:4px' }, S.session && S.session.user ? S.session.user.email : '')));
   const items = [];
+  items.push(h('button', { class: 'row', type: 'button', onClick: openReceiptList }, h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Recepción de compras'), h('div', { class: 'meta' }, 'Boletas, productos, vencimientos y control aleatorio de stock'))));
   if (isOwner()) items.push(h('button', { class: 'row', type: 'button', onClick: openTeam }, h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Equipo'), h('div', { class: 'meta' }, 'Activar empleados y cambiar roles'))));
   items.push(h('button', { class: 'row', type: 'button', onClick: openBackup }, h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Respaldo en Excel'), h('div', { class: 'meta' }, 'Descargar productos, lotes y movimientos'))));
   items.push(h('button', { class: 'row', type: 'button', onClick: openDiag }, h('div', { class: 'grow' }, h('div', { class: 'name' }, 'Revisar conexión'), h('div', { class: 'meta' }, 'Comprueba base de datos, permisos y cámara'))));
@@ -1485,6 +1695,10 @@ async function openDiag() {
   add(!!S.me, 'Perfil encontrado', S.me ? (isOwner() ? 'Dueño' : 'Empleado') + (S.me.active ? ' · activo' : ' · sin activar') : '');
   add(S.locations.length > 0, 'Ubicaciones (estante y almacén)', S.locations.map(l => l.name).join(', '));
   for (const [t, label] of [['v_stock_producto', 'Lectura de productos'], ['stock_lots', 'Lectura de lotes'], ['stock_movements', 'Lectura del historial']]) {
+    const { count, error } = await S.sb.from(t).select('*', { count: 'exact', head: true });
+    add(!error, label, error ? friendly(error) : count + ' registros');
+  }
+  for (const [t, label] of [['purchase_receipts', 'Recepción de compras'], ['purchase_receipt_lines', 'Detalle de recepciones'], ['purchase_receipt_audits', 'Conteos aleatorios']]) {
     const { count, error } = await S.sb.from(t).select('*', { count: 'exact', head: true });
     add(!error, label, error ? friendly(error) : count + ' registros');
   }
