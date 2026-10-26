@@ -13,7 +13,7 @@ Si el inventario ya tiene instalada la base de datos de la Fase 1, ejecuta solo 
 
 ## Recepción de compras
 
-Desde **Más → Recepción de compras**, fotografía la boleta y ejecuta el OCR opcional en español. El OCR muestra texto de referencia y puede sugerir el proveedor; verifica los datos en la boleta. Luego escanea o elige cada producto, registra lo indicado en la boleta, lo que realmente llegó, su vencimiento, ubicación y costo unitario. Las diferencias requieren una nota.
+Desde **Más → Recepción de compras**, fotografía la boleta y guarda el borrador. Para una lectura gratuita, abre esa foto en Google Fotos, toca Lens, selecciona y copia el texto completo y pégalo en el campo de la app. También puedes probar el OCR local. El texto sugiere proveedor y número de documento, pero confirma los datos con la foto. Luego escanea o elige cada producto y revisa cantidades, vencimiento, ubicación y costo unitario. Las diferencias requieren una nota.
 
 Antes de confirmar, la base de datos elige aleatoriamente entre uno y tres productos que ya tienen stock y los compara por ubicación. El conteo se refiere al stock anterior a la recepción y no lo modifica. Al confirmar, un único procedimiento actualiza los lotes, los costos y el historial; si falla, no aplica una recepción parcial.
 

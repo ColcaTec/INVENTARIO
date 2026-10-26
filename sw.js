@@ -1,6 +1,6 @@
 // Service worker: la red manda; el caché solo sirve si no hay internet (abrir la app sin señal).
 // Los datos (Supabase) nunca se guardan aquí.
-const CACHE = 'inventario-v4';
+const CACHE = 'inventario-v5';
 const SHELL = ['./', 'index.html', 'config.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', (e) => {
