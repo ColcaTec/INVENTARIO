@@ -1444,7 +1444,7 @@ function openNewReceipt() {
       } finally { if (worker) { try { await worker.terminate(); } catch (e) { /* ignorar */ } } }
     });
   } });
-  const save = btn('Guardar borrador', { kind: 'primary block' });
+  const save = btn('Guardar borrador', { kind: 'primary block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); error.replaceChildren();
     const file = photo.files && photo.files[0];
@@ -1542,7 +1542,7 @@ function addReceiptLine(receiptId, redraw) {
   const cost = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Costo por unidad (S/)' });
   const note = h('input', { type: 'text', placeholder: 'Obligatorio si hay diferencia' });
   const err = h('div', { role: 'alert' });
-  const save = btn('Guardar producto revisado', { kind: 'block' });
+  const save = btn('Guardar producto revisado', { kind: 'block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); err.replaceChildren();
     const p = byId(product.value), eq = parseQty(expected.value), rq = parseQty(received.value), c = parseMoney(cost.value);
@@ -1574,7 +1574,7 @@ function receiptAuditForm(receiptId, audits, redraw) {
       field('Conteo físico', count), field('Nota de diferencia', note)) };
   });
   const err = h('div', { role: 'alert' });
-  const save = btn('Guardar conteo aleatorio', { kind: 'block' });
+  const save = btn('Guardar conteo aleatorio', { kind: 'block', type: 'submit' });
   const form = h('form', { onSubmit: async ev => {
     ev.preventDefault(); err.replaceChildren();
     for (const x of fields) {
