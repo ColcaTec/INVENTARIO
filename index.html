@@ -1417,12 +1417,17 @@ function openReceiptList() {
 
 function suggestReceiptHeader(text) {
   const lines = String(text || '').split(/\r?\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
-  const ignored = /\b(RUC|BOLETA|FACTURA|TICKET|COMPROBANTE|ELECTR[ÓO]NICA|DIRECCI[ÓO]N|CLIENTE|FECHA|TEL[EÉ]FONO|CANTIDAD|PRECIO|SUBTOTAL|TOTAL|IGV|CAJERO|VENDEDOR)\b/i;
-  const supplier = lines.slice(0, 10).find(line =>
-    line.length >= 4 && line.length <= 120 &&
-    /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(line) &&
-    !/^\d/.test(line) && !ignored.test(line)
-  ) || '';
+  const ignored = /\b(RUC|BOLETA|FACTURA|TICKET|COMPROBANTE|ELECTR[ÓO]NICA|DIRECCI[ÓO]N|CLIENTE|FECHA|TEL[EÉ]FONO|CANTIDAD|PRECIO|SUBTOTAL|TOTAL|IGV|CAJERO|VENDEDOR|R.U.C.)\b/i;
+  const legal = /\b(S\.?A\.?C\.?|S\.?R\.?L\.?|E\.?I\.?R\.?L\.?|S\.?A\.?)\b/i;
+  const supplier = lines.slice(0, 14).find(line => {
+    const letters = (line.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length;
+    const words = line.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}/g) || [];
+    const meaningfulWords = words.filter(word => !/^(de|del|la|el|y|e|en)$/i.test(word));
+    const alphaRatio = letters / Math.max(line.length, 1);
+    return line.length >= 6 && line.length <= 100 && letters >= 6 &&
+      (meaningfulWords.length >= 2 || legal.test(line)) && alphaRatio >= 0.55 &&
+      !/^\d/.test(line) && !ignored.test(line);
+  }) || '';
   const joined = lines.join('\n');
   const numberPatterns = [
     /\b([FB]\s*\d{3,4}\s*[-–]\s*\d{1,10})\b/i,
@@ -1498,9 +1503,8 @@ function openNewReceipt() {
         worker = await window.Tesseract.createWorker('spa', 1, { logger: m => { if (m.status) status.textContent = 'OCR local: ' + m.status + (m.progress ? ' · ' + Math.round(m.progress * 100) + '%' : ''); } });
         const result = await worker.recognize(file);
         ocrText.value = (result.data.text || '').trim();
-        applyTextSuggestions();
         status.className = 'hint warn';
-        status.textContent = 'OCR local terminado. Revisa los campos o pega el texto de Google Lens si reconoció mejor la boleta.';
+        status.textContent = 'OCR local terminado; puede equivocarse. No completé proveedor ni número automáticamente. Pega aquí el texto de Google Lens para generar sugerencias más confiables.';
       } catch (e) {
         status.className = 'hint bad'; status.textContent = 'No se pudo leer la foto localmente. Puedes pegar aquí el texto copiado desde Google Lens y completar los datos manualmente.';
       } finally {
