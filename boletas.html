@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Inventario ColcaTec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #edf0ee; --surface: #ffffff; --ink: #15201c; --muted: #5b6a64; --line: #d3dad6;
+  --accent: #0c6e5c; --accent-ink: #ffffff; --warn-bg: #fff1d6; --warn: #8a5a00; --bad: #b3261e;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1613; --surface: #17211d; --ink: #e6eeea; --muted: #94a49c; --line: #2a3832;
+    --accent: #43c2a5; --accent-ink: #06251d; --warn-bg: #3a2d10; --warn: #f0c36a; --bad: #ff9a92; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding: 20px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+.app { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: 1.9rem; line-height: 1.1; margin: 0; letter-spacing: -0.01em; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 1.15rem; margin: 0; }
+.sub { margin: 6px 0 0; color: var(--muted); max-width: 58ch; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { appearance: none; background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 14px; font: inherit; font-weight: 500; color: var(--muted); cursor: pointer; margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible, label.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+label.btn { position: relative; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > span { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+input[type=text], input[type=number], input[type=search], input[type=email], input[type=password] {
+  width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); font: inherit; }
+input.num { font-family: var(--f-data); text-align: right; }
+.preview { max-height: 200px; max-width: 100%; border-radius: 4px; border: 1px solid var(--line); align-self: flex-start; }
+.status { min-height: 1.4em; color: var(--muted); }
+.status.err { color: var(--bad); }
+.meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.items { display: flex; flex-direction: column; gap: 10px; }
+.item { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 40px; gap: 8px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.item .name { grid-column: 1 / -1; }
+.item.low { background: var(--warn-bg); border-color: var(--warn); }
+.item .x { grid-column: 4; grid-row: 2; }
+.x { appearance: none; min-height: 40px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 5px; font-size: 1.2rem; cursor: pointer; }
+.badge { display: inline-block; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--warn); margin-left: 8px; }
+@media (min-width: 640px) {
+  .item { grid-template-columns: minmax(0, 1fr) 84px 104px 104px 40px; }
+  .item .name { grid-column: auto; }
+  .item .x { grid-column: auto; grid-row: auto; }
+}
+.totals { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; font-family: var(--f-data); border-top: 1px dashed var(--line); padding-top: 12px; }
+.totals b { font-weight: 500; }
+.alerts { margin: 0; padding-left: 18px; color: var(--warn); }
+.note { font-size: .85rem; color: var(--muted); margin: 0; }
+.hist details { border-top: 1px solid var(--line); padding: 10px 0; }
+.hist details:first-child { border-top: 0; }
+.hist summary { cursor: pointer; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; }
+.hist .sum-r { font-family: var(--f-data); }
+.hist .li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 6px 0 0 8px; font-size: .9rem; }
+.hist .li span:last-child { font-family: var(--f-data); color: var(--muted); }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 480px; }
+th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.n, th.n { text-align: right; font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+td input.num { max-width: 96px; }
+.empty { color: var(--muted); margin: 0; }
+.login { max-width: 380px; margin: 8vh auto 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Inicio de sesión -->
+<div class="app login" id="login" hidden>
+  <h1>Inventario ColcaTec</h1>
+  <p class="sub">Entra con el correo y la contraseña que te dieron.</p>
+  <form class="card" id="login-form">
+    <label class="field"><span>Correo</span><input type="email" id="l-mail" autocomplete="username" required></label>
+    <label class="field"><span>Contraseña</span><input type="password" id="l-pass" autocomplete="current-password" required></label>
+    <button class="btn primary" type="submit" id="l-btn">Entrar</button>
+    <div class="status" id="l-status" role="status" aria-live="polite"></div>
+  </form>
+</div>
+
+<!-- App -->
+<div class="app" id="app" hidden>
+  <header class="top">
+    <div>
+      <h1>Inventario ColcaTec</h1>
+      <p class="sub">Fotografía la boleta del proveedor: la app lee los productos, cantidades y precios, y calcula el precio de venta con tu margen.</p>
+    </div>
+    <button class="btn" id="btn-out">Salir</button>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Secciones">
+    <button class="tab" role="tab" aria-selected="true" data-view="scan">Escanear</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="hist">Historial</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="prod">Productos</button>
+  </nav>
+
+  <section id="view-scan" class="app">
+    <div class="card">
+      <h2>1. Foto de la boleta</h2>
+      <div class="row">
+        <label class="btn primary">Tomar foto<input type="file" id="in-cam" accept="image/*" capture="environment"></label>
+        <label class="btn">Elegir de la galería<input type="file" id="in-gal" accept="image/*"></label>
+      </div>
+      <img id="preview" class="preview" alt="Vista previa de la boleta" hidden>
+      <p class="note">Pon la boleta plana, con buena luz y que se vea completa. Si es muy larga, toma la foto por partes y lee cada parte por separado.</p>
+      <div class="row">
+        <div class="field" style="width:150px"><span>Margen de ganancia %</span>
+          <input type="number" id="margin" class="num" min="0" max="500" step="1" value="25" inputmode="decimal"></div>
+        <button class="btn primary" id="btn-read" disabled>Leer boleta</button>
+      </div>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+    </div>
+
+    <div class="card" id="result" hidden>
+      <h2>2. Revisa lo que se leyó</h2>
+      <div class="meta">
+        <div class="field"><span>Proveedor</span><input type="text" id="m-prov" autocomplete="off"></div>
+        <div class="field"><span>RUC</span><input type="text" id="m-ruc" inputmode="numeric" autocomplete="off"></div>
+        <div class="field"><span>Documento</span><input type="text" id="m-num" autocomplete="off"></div>
+        <div class="field"><span>Fecha</span><input type="text" id="m-fecha" placeholder="AAAA-MM-DD" autocomplete="off"></div>
+      </div>
+      <div class="items" id="items"></div>
+      <div class="row"><button class="btn" id="btn-add">Agregar producto</button></div>
+      <ul class="alerts" id="alerts" hidden></ul>
+      <div class="totals" id="totals"></div>
+      <div class="row">
+        <button class="btn primary" id="btn-save">Guardar en inventario</button>
+        <button class="btn" id="btn-clear">Descartar</button>
+      </div>
+      <div class="status" id="save-status" role="status" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="view-hist" class="card hist" hidden>
+    <h2>Boletas guardadas</h2>
+    <div id="hist-list"><p class="empty">Cargando…</p></div>
+  </section>
+
+  <section id="view-prod" class="card" hidden>
+    <div class="row" style="justify-content:space-between">
+      <h2>Productos</h2>
+      <button class="btn" id="btn-csv">Descargar CSV</button>
+    </div>
+    <input type="search" id="q" placeholder="Buscar producto" aria-label="Buscar producto">
+    <div class="tablewrap" id="prod-list"><p class="empty">Cargando…</p></div>
+    <p class="note">El stock suma lo que entra por boleta. Las ventas y los conteos de control se agregarán en la siguiente versión. Puedes cambiar el precio de venta aquí mismo.</p>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(function () {
+  // Datos públicos de tu proyecto de Supabase.
+  var SUPABASE_URL = 'https://cifeodsuansioztrvvkw.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_YP8RoLbMQnRYh2WOB7CPjw_jPS5Ky73';
+
+  var $ = function (s) { return document.querySelector(s); };
+  var sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  var imgBlob = null, rows = [], meta = {}, reported = {}, alerts = [], dupConfirm = false, products = [], busy = false;
+
+  function h(tag, attrs, kids) {
+    var el = document.createElement(tag);
+    for (var k in (attrs || {})) {
+      if (k === 'text') el.textContent = attrs[k];
+      else if (k === 'class') el.className = attrs[k];
+      else el.setAttribute(k, attrs[k]);
+    }
+    (kids || []).forEach(function (c) { if (c != null) el.append(c); });
+    return el;
+  }
+  function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : null; }
+  function money(n) { return (Math.round((n || 0) * 100) / 100).toFixed(2); }
+  function ventaDe(c, m) { return Math.ceil(c * (1 + m / 100) * 10 - 1e-9) / 10; }
+  function slug(s) {
+    var t = String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+    return t || 'producto';
+  }
+  function margin() { var m = num($('#margin').value); return m == null || m < 0 ? 0 : m; }
+  function setStatus(el, msg, err) { el.textContent = msg || ''; el.classList.toggle('err', !!err); }
+
+  /* ---------- sesión ---------- */
+  function mostrar(sesion) {
+    $('#login').hidden = !!sesion; $('#app').hidden = !sesion;
+    if (sesion) { cargarHist(); cargarProd(); }
+  }
+  sb.auth.getSession().then(function (r) { mostrar(r.data && r.data.session); });
+  sb.auth.onAuthStateChange(function (_e, s) { mostrar(s); });
+  $('#login-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var st = $('#l-status'); $('#l-btn').disabled = true; setStatus(st, 'Entrando…');
+    var r = await sb.auth.signInWithPassword({ email: $('#l-mail').value.trim(), password: $('#l-pass').value });
+    $('#l-btn').disabled = false;
+    if (r.error) setStatus(st, 'Correo o contraseña incorrectos.', true); else setStatus(st, '');
+  });
+  $('#btn-out').addEventListener('click', function () { sb.auth.signOut(); });
+
+  /* ---------- pestañas ---------- */
+  document.querySelectorAll('.tab').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+      ['scan', 'hist', 'prod'].forEach(function (v) { $('#view-' + v).hidden = (v !== b.dataset.view); });
+      if (b.dataset.view === 'hist') cargarHist();
+      if (b.dataset.view === 'prod') cargarProd();
+    });
+  });
+
+  /* ---------- foto (se reduce antes de enviar) ---------- */
+  function reducir(file) {
+    return new Promise(function (ok, fail) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var max = 1800, w = img.naturalWidth, hh = img.naturalHeight, k = Math.min(1, max / Math.max(w, hh));
+        var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(hh * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { b ? ok(b) : fail(new Error('blob')); }, 'image/jpeg', 0.85);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); fail(new Error('img')); };
+      img.src = url;
+    });
+  }
+  function blobB64(b) {
+    return new Promise(function (ok, fail) {
+      var r = new FileReader();
+      r.onload = function () { ok(String(r.result).split(',')[1]); };
+      r.onerror = fail; r.readAsDataURL(b);
+    });
+  }
+  async function onFile(e) {
+    var f = e.target.files && e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      imgBlob = await reducir(f);
+      var p = $('#preview');
+      if (p.dataset.url) URL.revokeObjectURL(p.dataset.url);
+      p.dataset.url = URL.createObjectURL(imgBlob); p.src = p.dataset.url; p.hidden = false;
+      $('#btn-read').disabled = false; setStatus($('#status'), 'Foto lista. Toca “Leer boleta”.');
+    } catch (x) { setStatus($('#status'), 'No se pudo abrir esa imagen. Prueba con otra foto.', true); }
+  }
+  $('#in-cam').addEventListener('change', onFile);
+  $('#in-gal').addEventListener('change', onFile);
+
+  /* ---------- lectura con Gemini ---------- */
+  $('#btn-read').addEventListener('click', async function () {
+    if (!imgBlob || busy) return;
+    busy = true; $('#btn-read').disabled = true;
+    setStatus($('#status'), 'Leyendo la boleta… puede tardar unos segundos.');
+    try {
+      var b64 = await blobB64(imgBlob);
+      var r = await sb.functions.invoke('leer-boleta', { body: { image: b64, mime: 'image/jpeg' } });
+      if (r.error || !r.data || !r.data.data) {
+        var code = '';
+        try { var j = r.error && r.error.context && await r.error.context.json(); code = j && j.error; } catch (x) {}
+        var msg = code === 'no_autorizado' ? 'Tu sesión venció. Sal y vuelve a entrar.'
+          : code === 'gemini' ? 'Gemini no respondió (puede haberse acabado el límite diario gratuito). Intenta más tarde.'
+          : code === 'sin_clave_gemini' ? 'Falta configurar la clave de Gemini en Supabase.'
+          : 'No se pudo leer la boleta. Toma la foto de nuevo, más cerca y con mejor luz.';
+        setStatus($('#status'), msg, true);
+      } else {
+        cargar(r.data.data); setStatus($('#status'), 'Listo. Revisa los datos antes de guardar.');
+      }
+    } catch (e) { setStatus($('#status'), 'Falló la conexión. Intenta de nuevo.', true); }
+    busy = false; $('#btn-read').disabled = false;
+  });
+
+  function cargar(d) {
+    d = d || {};
+    var pv = d.proveedor || {}, doc = d.documento || {}, t = d.totales || {};
+    meta = { proveedor: pv.nombre || '', ruc: pv.ruc || '', numero: doc.numero || '', fecha: doc.fecha || '', tipo: doc.tipo || 'otro' };
+    reported = { subtotal: num(t.subtotal), total: num(t.total) };
+    alerts = Array.isArray(d.alertas) ? d.alertas.filter(function (a) { return typeof a === 'string' && a.trim(); }) : [];
+    var m = margin();
+    rows = (Array.isArray(d.items) ? d.items : []).map(function (it) {
+      var cant = num(it.cantidad), pu = num(it.precio_unitario), tl = num(it.total_linea);
+      if (pu == null && tl != null && cant) pu = tl / cant;
+      var conf = it.confianza === 'alta' || it.confianza === 'media' ? it.confianza : 'baja';
+      if (cant == null || pu == null) conf = 'baja';
+      return { producto: String(it.producto || it.texto_original || '').trim(), original: String(it.texto_original || ''),
+        cantidad: cant == null ? 1 : cant, compra: pu == null ? 0 : Math.round(pu * 100) / 100,
+        venta: pu == null ? 0 : ventaDe(pu, m), manual: false, baja: conf === 'baja' };
+    });
+    if (!rows.length && !alerts.length) alerts.push('No se encontraron productos en la imagen.');
+    $('#m-prov').value = meta.proveedor; $('#m-ruc').value = meta.ruc; $('#m-num').value = meta.numero; $('#m-fecha').value = meta.fecha;
+    setStatus($('#save-status'), ''); $('#btn-save').textContent = 'Guardar en inventario'; dupConfirm = false;
+    $('#result').hidden = false; pintarItems(); pintarAlertas(); totales();
+    $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ---------- tabla editable ---------- */
+  function campo(label, input) { return h('label', { class: 'field' }, [h('span', { text: label }), input]); }
+  function pintarItems() {
+    var box = $('#items'); box.replaceChildren();
+    rows.forEach(function (r, i) {
+      var nm = h('input', { type: 'text', value: r.producto, autocomplete: 'off' });
+      var qt = h('input', { type: 'number', class: 'num', step: 'any', min: '0', inputmode: 'decimal', value: String(r.cantidad) });
+      var pc = h('input', { type: 'number', class: 'num', step: '0.01', min: '0', inputmode: 'decimal', value: money(r.compra) });
+      var pv = h('input', { type: 'number', class: 'num', step: '0.10', min: '0', inputmode: 'decimal', value: money(r.venta) });
+      var del = h('button', { class: 'x', type: 'button', 'aria-label': 'Quitar producto', text: '×' });
+      var lbl = h('span', { text: 'Producto' }); if (r.baja) lbl.append(h('span', { class: 'badge', text: 'Revisar' }));
+      var el = h('div', { class: 'item' + (r.baja ? ' low' : '') }, [h('label', { class: 'field name' }, [lbl, nm]), campo('Cantidad', qt), campo('Compra S/', pc), campo('Venta S/', pv), del]);
+      if (r.original && r.original !== r.producto) el.title = 'En la boleta: ' + r.original;
+      nm.addEventListener('input', function () { r.producto = nm.value; });
+      qt.addEventListener('input', function () { r.cantidad = num(qt.value) || 0; totales(); });
+      pc.addEventListener('input', function () {
+        r.compra = num(pc.value) || 0;
+        if (!r.manual) { r.venta = ventaDe(r.compra, margin()); pv.value = money(r.venta); }
+        totales();
+      });
+      pv.addEventListener('input', function () { r.venta = num(pv.value) || 0; r.manual = true; });
+      del.addEventListener('click', function () { rows.splice(i, 1); pintarItems(); totales(); });
+      box.append(el);
+    });
+  }
+  $('#btn-add').addEventListener('click', function () {
+    rows.push({ producto: '', original: '', cantidad: 1, compra: 0, venta: 0, manual: false, baja: false });
+    pintarItems(); totales();
+    var ins = $('#items').querySelectorAll('.item'), last = ins[ins.length - 1];
+    if (last) last.querySelector('input').focus();
+  });
+  $('#margin').addEventListener('input', function () {
+    var m = margin(), els = $('#items').querySelectorAll('.item');
+    rows.forEach(function (r, i) {
+      if (!r.manual) { r.venta = ventaDe(r.compra, m); var f = els[i] && els[i].querySelectorAll('input')[3]; if (f) f.value = money(r.venta); }
+    });
+  });
+  function pintarAlertas() {
+    var ul = $('#alerts'); ul.replaceChildren();
+    alerts.forEach(function (a) { ul.append(h('li', { text: a })); });
+    ul.hidden = !alerts.length;
+  }
+  function totales() {
+    var s = rows.reduce(function (a, r) { return a + (r.cantidad || 0) * (r.compra || 0); }, 0), box = $('#totals'); box.replaceChildren();
+    box.append(h('span', {}, ['Suma de productos: ', h('b', { text: 'S/ ' + money(s) })]));
+    var ref = reported.total != null ? reported.total : reported.subtotal;
+    if (ref != null) {
+      var d = Math.min(reported.total == null ? 1e9 : Math.abs(s - reported.total), reported.subtotal == null ? 1e9 : Math.abs(s - reported.subtotal));
+      box.append(h('span', {}, ['Total en la boleta: ', h('b', { text: 'S/ ' + money(ref) }), d <= 0.5 ? ' ✓ coincide' : ' ≠ difiere en S/ ' + money(d)]));
+    }
+  }
+
+  /* ---------- guardar ---------- */
+  $('#btn-save').addEventListener('click', async function () {
+    var st = $('#save-status');
+    var items = rows.filter(function (r) { return r.producto.trim() && r.cantidad > 0; });
+    if (!items.length) { setStatus(st, 'Agrega al menos un producto con nombre y cantidad.', true); return; }
+    meta.proveedor = $('#m-prov').value.trim(); meta.ruc = $('#m-ruc').value.trim();
+    meta.numero = $('#m-num').value.trim(); meta.fecha = $('#m-fecha').value.trim();
+    $('#btn-save').disabled = true;
+    try {
+      if (!dupConfirm && meta.numero) {
+        var d = await sb.from('lector_boletas').select('id').eq('numero', meta.numero).eq('ruc', meta.ruc).limit(1);
+        if (d.data && d.data.length) {
+          dupConfirm = true; $('#btn-save').textContent = 'Guardar de todos modos';
+          setStatus(st, 'Ya guardaste una boleta con este número y RUC. Si es otra, toca “Guardar de todos modos”.', true);
+          $('#btn-save').disabled = false; return;
+        }
+      }
+      setStatus(st, 'Guardando…');
+      var rec = {
+        proveedor: meta.proveedor, ruc: meta.ruc, numero: meta.numero, fecha: meta.fecha, tipo: meta.tipo, margen: margin(),
+        total: Math.round(items.reduce(function (a, r) { return a + r.cantidad * r.compra; }, 0) * 100) / 100,
+        items: items.map(function (r) { return { producto: r.producto.trim(), cantidad: r.cantidad, compra: r.compra, venta: r.venta }; })
+      };
+      var ins = await sb.from('lector_boletas').insert(rec);
+      if (ins.error) throw ins.error;
+      for (var i = 0; i < rec.items.length; i++) {
+        var it = rec.items[i];
+        var rp = await sb.rpc('lector_recibir_producto', { p_id: slug(it.producto), p_nombre: it.producto, p_cantidad: it.cantidad, p_costo: it.compra, p_venta: it.venta, p_proveedor: meta.proveedor });
+        if (rp.error) throw rp.error;
+      }
+      setStatus(st, 'Guardado: ' + rec.items.length + ' productos sumados al inventario.');
+      rows = []; $('#result').hidden = true; $('#preview').hidden = true; imgBlob = null; $('#btn-read').disabled = true;
+      setStatus($('#status'), 'Boleta guardada. Puedes leer otra.');
+    } catch (e) {
+      setStatus(st, 'No se pudo guardar. Revisa tu conexión e inténtalo de nuevo.', true);
+    }
+    $('#btn-save').disabled = false;
+  });
+  $('#btn-clear').addEventListener('click', function () { rows = []; $('#result').hidden = true; setStatus($('#status'), ''); });
+
+  /* ---------- historial ---------- */
+  async function cargarHist() {
+    var box = $('#hist-list');
+    var r = await sb.from('lector_boletas').select('*').order('created_at', { ascending: false }).limit(100);
+    box.replaceChildren();
+    if (r.error) { box.append(h('p', { class: 'empty', text: 'No se pudo cargar el historial.' })); return; }
+    if (!r.data.length) { box.append(h('p', { class: 'empty', text: 'Todavía no hay boletas guardadas. Lee la primera desde la pestaña Escanear.' })); return; }
+    r.data.forEach(function (x) {
+      var titulo = (x.proveedor || 'Sin proveedor') + (x.numero ? ' · ' + x.numero : '');
+      var sub = x.fecha || new Date(x.created_at).toLocaleDateString('es-PE');
+      var d = h('details', {}, [h('summary', {}, [h('span', { text: titulo + ' — ' + sub }), h('span', { class: 'sum-r', text: 'S/ ' + money(x.total) + ' · ' + (x.items || []).length + ' prod.' })])]);
+      (x.items || []).forEach(function (it) {
+        d.append(h('div', { class: 'li' }, [h('span', { text: it.cantidad + ' × ' + it.producto }), h('span', { text: 'compra ' + money(it.compra) + ' · venta ' + money(it.venta) })]));
+      });
+      box.append(d);
+    });
+  }
+
+  /* ---------- productos ---------- */
+  async function cargarProd() {
+    var r = await sb.from('lector_productos').select('*').order('nombre', { ascending: true }).limit(2000);
+    if (r.error) { $('#prod-list').replaceChildren(h('p', { class: 'empty', text: 'No se pudo cargar los productos.' })); return; }
+    products = r.data; pintarProd();
+  }
+  function pintarProd() {
+    var box = $('#prod-list'), q = $('#q').value.trim().toLowerCase();
+    var list = products.filter(function (p) { return !q || String(p.nombre).toLowerCase().indexOf(q) >= 0; });
+    box.replaceChildren();
+    if (!products.length) { box.append(h('p', { class: 'empty', text: 'Aquí aparecerán los productos cuando guardes tu primera boleta, con su stock, costo y precio de venta.' })); return; }
+    if (!list.length) { box.append(h('p', { class: 'empty', text: 'Ningún producto coincide con la búsqueda.' })); return; }
+    var body = h('tbody');
+    list.forEach(function (p) {
+      var inp = h('input', { type: 'number', class: 'num', step: '0.10', min: '0', value: money(p.venta), 'aria-label': 'Precio de venta de ' + p.nombre });
+      inp.addEventListener('change', async function () {
+        var v = num(inp.value); if (v == null || v < 0) { inp.value = money(p.venta); return; }
+        var u = await sb.from('lector_productos').update({ venta: v, updated_at: new Date().toISOString() }).eq('id', p.id);
+        if (u.error) inp.value = money(p.venta); else p.venta = v;
+      });
+      body.append(h('tr', {}, [h('td', { text: p.nombre }), h('td', { class: 'n', text: String(Math.round((p.stock || 0) * 100) / 100) }), h('td', { class: 'n', text: money(p.costo) }), h('td', { class: 'n' }, [inp])]));
+    });
+    box.append(h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', { text: 'Producto' }), h('th', { class: 'n', text: 'Stock' }), h('th', { class: 'n', text: 'Costo' }), h('th', { class: 'n', text: 'Venta' })])]), body]));
+  }
+  $('#q').addEventListener('input', pintarProd);
+  $('#btn-csv').addEventListener('click', function () {
+    function c(v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var lines = ['producto,stock,costo,venta,proveedor'];
+    products.forEach(function (p) { lines.push([c(p.nombre), c(p.stock), c(money(p.costo)), c(money(p.venta)), c(p.proveedor)].join(',')); });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'productos.csv'; document.body.append(a); a.click(); a.remove();
+  });
+})();
+</script>
+</body>
+</html>
